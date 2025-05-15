@@ -1,4 +1,4 @@
-package com.egov.socialservice;
+package com.egov.contractservice;
 
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.stereotype.Service;

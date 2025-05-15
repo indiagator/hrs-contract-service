@@ -1,4 +1,4 @@
-package com.egov.socialservice;
+package com.egov.contractservice;
 
 import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
 import io.github.resilience4j.retry.RetryConfig;
