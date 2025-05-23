@@ -37,6 +37,9 @@ public class MainRestController
        @Autowired
        TokenService tokenService;
 
+         @Autowired
+        Producer producer;
+
         @Autowired
         private RedisTemplate<String, Object> redisTemplate;
 
@@ -71,6 +74,10 @@ public class MainRestController
                Cookie cookie3 = new Cookie("cs-cookie-2", String.valueOf(new Random().nextInt(1000000)));
                cookie1.setMaxAge(3600);
 
+               // Cookie generation code
+               Cookie cookie4 = new Cookie("domain-event-cookie", String.valueOf(new Random().nextInt(1000000)));
+               cookie1.setMaxAge(3600);
+
                redisTemplate.opsForValue().set(cookie1.getValue(), "Stage 1 Complete - Stage 2 Processing");
                redisTemplate.opsForValue().set(cookie3.getValue(), "Stage 2 Complete - Stage 3 Processing");
 
@@ -81,6 +88,19 @@ public class MainRestController
 
                    project.setStatus("FLOATED");
                    Project savedProject = projectRepository.save(project);
+
+                   DomainEvent domainEvent  = new DomainEvent();
+                   domainEvent.setEventType("CREATE");
+                   domainEvent.setDbname("hrs-mongodb");
+                   domainEvent.setDocumentid(savedProject.getProjectid());
+                   domainEvent.setCollectionname("projects");
+                   domainEvent.setPrincipalid(project.getCustomerid());
+                   domainEvent.setEndpoint("contract-service/api/v1/float/project");
+                   domainEvent.getTraceparent().add(traceparent);
+
+                   log.info("Domain Event updation in Progress: "+domainEvent);
+                   redisTemplate.opsForValue().set(cookie4.getValue(), domainEvent);
+                   log.info("Domain Event updated in Redis with key : "+ cookie4.getValue());
 
                    // Cookie generation code
                    Cookie cookie2 = new Cookie("projectid", String.valueOf(savedProject.getProjectid()));
@@ -110,6 +130,7 @@ public class MainRestController
 
                    httpServletResponse.addCookie(cookie1);
                    httpServletResponse.addCookie(cookie2);
+                   httpServletResponse.addCookie(cookie4);
 
                    return ResponseEntity.ok("Project Floated Succesfully");
                }
@@ -120,7 +141,23 @@ public class MainRestController
                    String cacheKey =  cookieList.stream().filter(cookie -> cookie.getName().equals("cs-cookie-2")).findAny().get().getValue();
                    String cacheValue = (String)redisTemplate.opsForValue().get(cacheKey);
 
-                   return ResponseEntity.status(200).body(cacheValue);
+
+                   if(cacheValue.equals("Stage 2 Complete - Stage 3 Processing"))
+                   {
+                       log.info("Cookie already present | Response not yet ready");
+                       return ResponseEntity.status(200).body(cacheValue);
+                   }
+                   else
+                   {
+                       String domainEventKey =  cookieList.stream().filter(cookie -> cookie.getName().equals("domain-event-cookie")).findAny().get().getValue();
+                       DomainEvent domainEvent = (DomainEvent) redisTemplate.opsForValue().get(domainEventKey);
+                       domainEvent.getTraceparent().add(traceparent);
+                       redisTemplate.opsForValue().set(domainEventKey, domainEvent);
+
+                       producer.pubDomainEvent(domainEvent);
+
+                       return ResponseEntity.status(200).body(cacheValue);
+                   }
                }
                else if( cookieList.stream().filter(cookie -> cookie.getName().equals("cs-cookie-1")).findAny().isPresent())
                {
@@ -171,6 +208,12 @@ public class MainRestController
                                });
                        //
 
+                       String domainEventKey =  cookieList.stream().filter(cookie -> cookie.getName().equals("domain-event-cookie")).findAny().get().getValue();
+                       DomainEvent domainEvent = (DomainEvent) redisTemplate.opsForValue().get(domainEventKey);
+                       domainEvent.getTraceparent().add(traceparent);
+                       redisTemplate.opsForValue().set(domainEventKey, domainEvent);
+
+
                        httpServletResponse.addCookie(cookie3);
                        return ResponseEntity.status(200).body(cacheValue + " - Stage 2 Complete - Stage 3 Processing");
                    }
@@ -189,10 +232,14 @@ public class MainRestController
        }
 
     @GetMapping("get/projects/{customerid}")
-    public ResponseEntity<?> getProjectsOfCustomer(@PathVariable("customerid") Long customerid)
+    public ResponseEntity<?> getProjectsOfCustomer(@PathVariable("customerid") Long customerid) throws JsonProcessingException
     {
         List<Project> projects =  projectRepository.findByCustomerid(customerid);
-        return ResponseEntity.ok(projects);
+
+        ObjectMapper objectMapper = new ObjectMapper();
+        String datum = objectMapper.writeValueAsString(projects);
+
+        return ResponseEntity.ok(datum);
     }
 
 
